@@ -1,9 +1,13 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
-    "api/*.py": {
-      "includeFiles": "bin/**",
+    "api/main.py": {
       "maxDuration": 60,
       "memory": 1024
+    },
+    "api/health.py": {
+      "maxDuration": 10,
+      "memory": 128
     }
   },
   "rewrites": [
