@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/**/*.py": {
+      "includeFiles": "bin/**",
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  },
+  "rewrites": [
+    { "source": "/metadata", "destination": "/api/main/metadata" },
+    { "source": "/download-progress", "destination": "/api/main/download-progress" }
+  ]
+}
