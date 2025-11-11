@@ -33,10 +33,8 @@ app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 DOWNLOAD_STATE: Dict[str, Any] = {"progress": 0, "status": "idle"}
 
 def progress_hook(d: Dict[str, Any]) -> None:
-    """Callback do yt-dlp para atualizar o estado global do download."""
     global DOWNLOAD_STATE
     status = d.get('status')
-
     if status == 'downloading':
         progress_str = d.get('_percent_str', '0%').strip()
         progress_str = progress_str.replace('\x1b[0;94m', '').replace('\x1b[0m', '')
@@ -51,11 +49,9 @@ def progress_hook(d: Dict[str, Any]) -> None:
         DOWNLOAD_STATE["status"] = "finished"
 
 def _sanitize_filename(name: str) -> str:
-    """Remove caracteres problemáticos para nomes de arquivos."""
     return "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).rstrip()
 
 def _find_newest_with_ext(directory: str, ext: str) -> Optional[str]:
-    """Retorna o arquivo mais recente no diretório com a extensão indicada."""
     pattern = os.path.join(directory, f'*.{ext.lstrip(".")}')
     candidates = glob.glob(pattern)
     if not candidates:
@@ -70,9 +66,9 @@ def download_media(
     video_quality: Optional[str] = None
 ) -> str:
     """
-    Realiza o download de mídia (MP3 ou MP4) via yt-dlp e retorna o caminho final.
-    - MP3: usa FFmpegExtractAudio (precisa FFmpeg instalado). Aceita 'audio_bitrate' (kbps).
-    - MP4: mescla melhor vídeo + melhor áudio. Aceita 'video_quality' (altura máxima, ex.: 720).
+    Download via yt-dlp e retorna caminho final.
+    - MP3: FFmpegExtractAudio (precisa FFmpeg).
+    - MP4: mescla melhor vídeo + melhor áudio.
     """
     global DOWNLOAD_STATE
     DOWNLOAD_STATE = {"progress": 0.0, "status": "starting"}
@@ -89,6 +85,7 @@ def download_media(
         'overwrites': True,
         'quiet': False,
         'ffmpeg_location': FFMPEG_PATH,
+        'prefer_ffmpeg': True,
     }
 
     if file_type == 'mp3':
@@ -96,7 +93,6 @@ def download_media(
             target_kbps = str(int(audio_bitrate)) if audio_bitrate else '192'
         except Exception:
             target_kbps = '192'
-
         ydl_opts.update({
             'format': 'bestaudio/best',
             'postprocessors': [{
@@ -104,28 +100,26 @@ def download_media(
                 'preferredcodec': 'mp3',
                 'preferredquality': target_kbps,
             }],
-            'prefer_ffmpeg': True,
         })
     else:
-        fmt: str
         try:
             h = int(video_quality) if video_quality else None
         except Exception:
             h = None
-
         if h:
             fmt = f"bestvideo[ext=mp4][height<={h}]+bestaudio[ext=m4a]/best[height<={h}]"
         else:
             fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"
-
         ydl_opts.update({
             'format': fmt,
             'merge_output_format': 'mp4',
         })
 
     try:
-        logging.info(f"Iniciando download: url={url} tipo={file_type} dir={temp_dir} opts_extra={{'audio_bitrate': %s, 'video_quality': %s}}",
-                     audio_bitrate, video_quality)
+        logging.info(
+            "Iniciando download: url=%s tipo=%s dir=%s opts_extra={'audio_bitrate': %s, 'video_quality': %s}",
+            url, file_type, temp_dir, audio_bitrate, video_quality
+        )
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             if not info:
@@ -134,19 +128,16 @@ def download_media(
             title = info.get('title') or f'media_{uuid.uuid4().hex[:8]}'
             sanitized_title = _sanitize_filename(title)
 
-            final_path: Optional[str] = None
-
             if file_type == 'mp3':
                 final_path = _find_newest_with_ext(temp_dir, 'mp3')
                 if not final_path:
                     final_path = _find_newest_with_ext(temp_dir, 'webm') or _find_newest_with_ext(temp_dir, 'm4a')
                     if not final_path:
-                        raise ValueError("Falha ao localizar o arquivo MP3 gerado. Verifique se o FFmpeg está instalado no PATH.")
+                        raise ValueError("Falha ao localizar o arquivo MP3 gerado. Verifique se o FFmpeg está disponível.")
                 dest = os.path.join(temp_dir, f"{sanitized_title}.mp3")
                 if os.path.abspath(final_path) != os.path.abspath(dest):
                     os.replace(final_path, dest)
                 final_path = dest
-
             else:
                 final_path = _find_newest_with_ext(temp_dir, 'mp4')
                 if not final_path:
@@ -157,20 +148,19 @@ def download_media(
                         final_path = _find_newest_with_ext(temp_dir, 'mkv') or _find_newest_with_ext(temp_dir, 'webm')
                 if not final_path:
                     raise ValueError("Falha ao localizar o arquivo de vídeo final (merge). Verifique FFmpeg.")
-
                 _, ext = os.path.splitext(final_path)
-                dest = os.path.join(temp_dir, f"{sanitiz_title}{ext}")
+                dest = os.path.join(temp_dir, f"{sanitized_title}{ext}")  # <- corrigido
                 if os.path.abspath(final_path) != os.path.abspath(dest):
                     os.replace(final_path, dest)
                 final_path = dest
 
-            logging.info(f"Download concluído: {final_path}")
+            logging.info("Download concluído: %s", final_path)
             DOWNLOAD_STATE["status"] = "finished"
             DOWNLOAD_STATE["progress"] = 100.0
             return final_path
 
     except yt_dlp.utils.DownloadError as e:
-        logging.error(f"Erro yt-dlp: {e}")
+        logging.error("Erro yt-dlp: %s", e)
         DOWNLOAD_STATE["status"] = "error"
         raise
     except Exception as e:
@@ -181,18 +171,30 @@ def download_media(
 @app.route('/', methods=['GET', 'POST'])
 def index():
     """
-    GET: Renderiza o template 'index.html' (que monta o Vue).
-    POST: Recebe URL + tipo (mp3/mp4) + opções e retorna o arquivo.
+    GET: Renderiza 'index.html' (se existir).
+    POST: Recebe URL + tipo (mp3/mp4) + opções (JSON ou form) e retorna o arquivo.
     """
     if request.method == 'POST':
-        url = (request.form.get('url') or '').strip()
-        file_type = (request.form.get('file_type') or 'mp4').strip().lower()
+        # aceita JSON (fetch) ou form tradicional
+        if request.is_json:
+            data = request.get_json(silent=True) or {}
+            url = (data.get('url') or '').strip()
+            file_type = (data.get('file_type') or 'mp4').strip().lower()
+            audio_bitrate = data.get('audio_bitrate')
+            video_quality = data.get('video_quality')
+        else:
+            url = (request.form.get('url') or '').strip()
+            file_type = (request.form.get('file_type') or 'mp4').strip().lower()
+            audio_bitrate = request.form.get('audio_bitrate')
+            video_quality = request.form.get('video_quality')
 
-        audio_bitrate = request.form.get('audio_bitrate')
-        video_quality = request.form.get('video_quality')
+        is_xhr = request.headers.get('X-Requested-With') in ('fetch', 'XMLHttpRequest')
 
         if not url:
-            return render_template('index.html', message="Erro: A URL não pode estar vazia."), 400
+            msg = 'A URL não pode estar vazia.'
+            if is_xhr:
+                return jsonify({'error': msg}), 400
+            return render_template('index.html', message=f"Erro: {msg}"), 400
 
         try:
             file_path = download_media(
@@ -202,7 +204,6 @@ def index():
                 video_quality=video_quality
             )
             file_name = os.path.basename(file_path)
-
             response = send_file(file_path, as_attachment=True, download_name=file_name)
 
             def _cleanup():
@@ -219,27 +220,28 @@ def index():
                         os.rmdir(directory)
                     except Exception:
                         pass
-                    logging.info(f"Limpeza concluída: {directory}")
+                    logging.info("Limpeza concluída: %s", directory)
                 except Exception as e:
-                    logging.error(f"Erro ao limpar temporários: {e}")
+                    logging.error("Erro ao limpar temporários: %s", e)
 
             response.call_on_close(_cleanup)
             return response
 
         except Exception as e:
             logging.exception("Falha no processamento do POST /")
+            if request.headers.get('X-Requested-With') in ('fetch','XMLHttpRequest'):
+                return jsonify({'error': f'Erro ao processar sua solicitação: {e}'}), 500
             return render_template('index.html', message=f"Erro ao processar sua solicitação: {e}"), 500
 
+    # GET
     return render_template('index.html', message='')
 
 @app.route('/download-progress')
 def download_progress_route() -> Response:
-    """SSE: envia JSON com {'progress': <0..100>} e, em caso de erro, {'progress': -1, 'error': '...'}"""
-
+    """SSE: envia {'progress': <0..100>} ou {'progress': -1, 'error': '...'}"""
     def generate() -> Generator[str, None, None]:
         global DOWNLOAD_STATE
         last_progress = None
-
         while DOWNLOAD_STATE.get("status") in ("starting", "downloading"):
             prog = DOWNLOAD_STATE.get("progress", 0.0)
             if prog != last_progress:
@@ -273,7 +275,7 @@ def metadata_route():
             url = (request.args.get('url') or '').strip()
 
         if not url:
-            return jsonify({ 'error': 'missing url' }), 400
+            return jsonify({'error': 'missing url'}), 400
 
         ydl_opts: Dict[str, Any] = {
             'quiet': True,
@@ -284,7 +286,7 @@ def metadata_route():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
         if not info:
-            return jsonify({ 'error': 'no info' }), 404
+            return jsonify({'error': 'no info'}), 404
 
         return jsonify({
             'title': info.get('title') or '',
@@ -293,11 +295,10 @@ def metadata_route():
         })
     except Exception as e:
         logging.exception('Erro ao extrair metadados')
-        return jsonify({ 'error': str(e) }), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/como_usar')
 def como_usar():
-    """Corrigido: o template chama-se 'comousar.html'."""
     return render_template('comousar.html')
 
 @app.route('/contato')
@@ -316,9 +317,8 @@ def internal_error(e):
 
 if __name__ == '__main__':
     if os.name == 'nt':
-         local_ffmpeg_dir = r"C:\ffmpeg\bin"
-         os.environ["PATH"] = local_ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
-         os.environ["FFMPEG_LOCATION"] = local_ffmpeg_dir
-         FFMPEG_PATH = local_ffmpeg_dir
-    
+        local_ffmpeg_dir = r"C:\ffmpeg\bin"
+        os.environ["PATH"] = local_ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+        os.environ["FFMPEG_LOCATION"] = local_ffmpeg_dir
+        FFMPEG_PATH = local_ffmpeg_dir
     app.run(host="0.0.0.0", port=8080, debug=True)
