@@ -6,31 +6,26 @@
     <title>SaveTube</title>
     <link rel="icon" href="/static/images/favicon.png" type="image/x-icon" />
     <meta name="color-scheme" content="dark light" />
-    <!-- Brand font via CDN -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/dist/assets/main.css" />
     <style>
-      /* fallback rápido enquanto o bundle carrega */
       body { margin:0; background:#0f172a; color:#e2e8f0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial; }
       .wrap { max-width: 960px; margin: 40px auto; padding: 0 16px; }
       .msg { margin-top: 12px; color: #fca5a5; font-size: 14px; }
     </style>
   </head>
   <body>
-    <!-- container do Vue -->
     <div id="app"></div>
-
-    <!-- mensagem opcional vinda do Flask (ex.: erros de formulário) -->
     {% if message %}
     <div class="wrap">
       <div class="msg">{{ message }}</div>
     </div>
     {% endif %}
 
-    <!-- PRODUÇÃO: aponta para o bundle gerado pelo Vite -->
 <script type="module" src="/static/dist/main.js"></script>
 
   </body>
 </html>
+
