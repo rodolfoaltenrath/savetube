@@ -7,26 +7,13 @@ import tempfile
 import logging
 from typing import Dict, Any, Generator, Optional
 
-# --- Corrige cadeia de certificados (Windows/venv) ---
-# Deve vir ANTES de importar yt_dlp.
 import certifi
 os.environ.setdefault('SSL_CERT_FILE', certifi.where())
 os.environ.setdefault('REQUESTS_CA_BUNDLE', certifi.where())
 
-# --- FFmpeg: Caminho dinâmico (Vercel/Linux) --- # <--- MUDANÇA (1)
-# 1. Define o caminho absoluto para o diretório RAIZ do projeto
-#    (__file__ é o caminho para 'api/main.py')
-#    (os.path.dirname(__file__) é a pasta 'api/')
-#    (O 'pai' (..) dessa pasta é a raiz do projeto)
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-
-# 2. Define o caminho para o binário do FFmpeg que colocaremos na pasta 'bin'
 FFMPEG_PATH = os.path.join(BASE_DIR, 'bin', 'ffmpeg')
-
-# 3. Informa ao yt-dlp onde encontrar o FFmpeg
-#    (Substitui as linhas antigas que usavam C:\ffmpeg)
 os.environ["FFMPEG_LOCATION"] = FFMPEG_PATH
-
 
 import yt_dlp
 from flask import (
@@ -34,27 +21,16 @@ from flask import (
     request, send_file, make_response, jsonify
 )
 
-# --- Configuração Inicial ---
-
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# --- Caminhos Corrigidos para Templates e Static --- # <--- MUDANÇA (2)
-# Define os caminhos das pastas 'templates' e 'static' a partir da RAIZ
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
-
-# Usa esses caminhos absolutos na inicialização do Flask
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 
-
-# Estado global simples para progresso (adequado 1 usuário por vez)
 DOWNLOAD_STATE: Dict[str, Any] = {"progress": 0, "status": "idle"}
-
-
-# --- Funções Auxiliares ---
 
 def progress_hook(d: Dict[str, Any]) -> None:
     """Callback do yt-dlp para atualizar o estado global do download."""
@@ -62,9 +38,7 @@ def progress_hook(d: Dict[str, Any]) -> None:
     status = d.get('status')
 
     if status == 'downloading':
-        # Ex.: d.get('_percent_str') => ' 42.3%'
         progress_str = d.get('_percent_str', '0%').strip()
-        # remove sequências ANSI se existirem
         progress_str = progress_str.replace('\x1b[0;94m', '').replace('\x1b[0m', '')
         try:
             progress = float(progress_str.replace('%', ''))
@@ -76,11 +50,9 @@ def progress_hook(d: Dict[str, Any]) -> None:
         DOWNLOAD_STATE["progress"] = 100.0
         DOWNLOAD_STATE["status"] = "finished"
 
-
 def _sanitize_filename(name: str) -> str:
     """Remove caracteres problemáticos para nomes de arquivos."""
     return "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-
 
 def _find_newest_with_ext(directory: str, ext: str) -> Optional[str]:
     """Retorna o arquivo mais recente no diretório com a extensão indicada."""
@@ -91,12 +63,11 @@ def _find_newest_with_ext(directory: str, ext: str) -> Optional[str]:
     candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return candidates[0]
 
-
 def download_media(
     url: str,
     file_type: str,
-    audio_bitrate: Optional[str] = None,  # '320' | '192' | ...
-    video_quality: Optional[str] = None   # '1080' | '720' | ...
+    audio_bitrate: Optional[str] = None,
+    video_quality: Optional[str] = None
 ) -> str:
     """
     Realiza o download de mídia (MP3 ou MP4) via yt-dlp e retorna o caminho final.
@@ -106,28 +77,21 @@ def download_media(
     global DOWNLOAD_STATE
     DOWNLOAD_STATE = {"progress": 0.0, "status": "starting"}
 
-    # O Vercel permite escrever no diretório /tmp
-    temp_dir = tempfile.mkdtemp(prefix="savetube_", dir="/tmp") # <--- MUDANÇA (3) (Garantindo que usamos /tmp)
-
-    # Template de saída; ext real pode variar antes do pós-processamento
+    temp_dir = tempfile.mkdtemp(prefix="savetube_", dir="/tmp")
     outtmpl = os.path.join(temp_dir, '%(title).200B.%(ext)s')
 
-    # Opções base
     ydl_opts: Dict[str, Any] = {
         'outtmpl': outtmpl,
         'progress_hooks': [progress_hook],
         'noplaylist': True,
         'logger': logging.getLogger(__name__),
-        # Evita prompts interativos
         'nocheckcertificate': True,
         'overwrites': True,
         'quiet': False,
-        # aponta explicitamente para ffmpeg/ffprobe
-        'ffmpeg_location': FFMPEG_PATH,  # <--- MUDANÇA (4) (Usa o novo caminho)
+        'ffmpeg_location': FFMPEG_PATH,
     }
 
     if file_type == 'mp3':
-        # bitrate alvo (yt-dlp usa 'preferredquality' como string)
         try:
             target_kbps = str(int(audio_bitrate)) if audio_bitrate else '192'
         except Exception:
@@ -143,7 +107,6 @@ def download_media(
             'prefer_ffmpeg': True,
         })
     else:
-        # Limita por resolução se fornecida (altura <= h)
         fmt: str
         try:
             h = int(video_quality) if video_quality else None
@@ -151,7 +114,6 @@ def download_media(
             h = None
 
         if h:
-            # tenta best video mp4 até a resolução escolhida + best audio m4a, com fallback "best" <= h
             fmt = f"bestvideo[ext=mp4][height<={h}]+bestaudio[ext=m4a]/best[height<={h}]"
         else:
             fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"
@@ -169,42 +131,33 @@ def download_media(
             if not info:
                 raise ValueError("Não foi possível extrair informações da URL.")
 
-            # Título seguro
             title = info.get('title') or f'media_{uuid.uuid4().hex[:8]}'
             sanitized_title = _sanitize_filename(title)
 
-            # Descobre o arquivo final gerado:
             final_path: Optional[str] = None
 
             if file_type == 'mp3':
-                # Após o postprocess, deve existir um .mp3
                 final_path = _find_newest_with_ext(temp_dir, 'mp3')
                 if not final_path:
-                    # fallback: procura best ext de áudio caso falhe o FFmpeg
                     final_path = _find_newest_with_ext(temp_dir, 'webm') or _find_newest_with_ext(temp_dir, 'm4a')
                     if not final_path:
                         raise ValueError("Falha ao localizar o arquivo MP3 gerado. Verifique se o FFmpeg está instalado no PATH.")
-                # Renomeia para título sanitizado e .mp3
                 dest = os.path.join(temp_dir, f"{sanitized_title}.mp3")
                 if os.path.abspath(final_path) != os.path.abspath(dest):
                     os.replace(final_path, dest)
                 final_path = dest
 
-            else:  # vídeo
-                # Geralmente o arquivo mesclado final terá .mp4
+            else:
                 final_path = _find_newest_with_ext(temp_dir, 'mp4')
                 if not final_path:
-                    # fallback: se não mesclou, tenta pelo prepare_filename
                     guessed = ydl.prepare_filename(info)
                     if guessed and os.path.exists(guessed):
                         final_path = guessed
                     else:
-                        # última tentativa: pega qualquer vídeo comum
                         final_path = _find_newest_with_ext(temp_dir, 'mkv') or _find_newest_with_ext(temp_dir, 'webm')
                 if not final_path:
                     raise ValueError("Falha ao localizar o arquivo de vídeo final (merge). Verifique FFmpeg.")
 
-                # Preserve a extensão real (não force .mp4 se for .mkv/.webm)
                 _, ext = os.path.splitext(final_path)
                 dest = os.path.join(temp_dir, f"{sanitiz_title}{ext}")
                 if os.path.abspath(final_path) != os.path.abspath(dest):
@@ -225,9 +178,6 @@ def download_media(
         DOWNLOAD_STATE["status"] = "error"
         raise ValueError(f"Ocorreu um erro inesperado: {e}")
 
-
-# --- Rotas da Aplicação ---
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
     """
@@ -238,9 +188,8 @@ def index():
         url = (request.form.get('url') or '').strip()
         file_type = (request.form.get('file_type') or 'mp4').strip().lower()
 
-        # Novos campos vindos do modal:
-        audio_bitrate = request.form.get('audio_bitrate')    # ex.: '96'
-        video_quality = request.form.get('video_quality')    # ex.: '720'
+        audio_bitrate = request.form.get('audio_bitrate')
+        video_quality = request.form.get('video_quality')
 
         if not url:
             return render_template('index.html', message="Erro: A URL não pode estar vazia."), 400
@@ -254,16 +203,13 @@ def index():
             )
             file_name = os.path.basename(file_path)
 
-            # Envia o arquivo como anexo
             response = send_file(file_path, as_attachment=True, download_name=file_name)
 
-            # Limpa os temporários SOMENTE após a resposta terminar de ser enviada
             def _cleanup():
                 try:
                     directory = os.path.dirname(file_path)
                     if os.path.exists(file_path):
                         os.remove(file_path)
-                    # remove arquivos remanescentes, se houver
                     try:
                         for leftover in os.listdir(directory):
                             try:
@@ -282,12 +228,9 @@ def index():
 
         except Exception as e:
             logging.exception("Falha no processamento do POST /")
-            # Evita 500 em tela: volta a index com msg
             return render_template('index.html', message=f"Erro ao processar sua solicitação: {e}"), 500
 
-    # GET
     return render_template('index.html', message='')
-
 
 @app.route('/download-progress')
 def download_progress_route() -> Response:
@@ -297,7 +240,6 @@ def download_progress_route() -> Response:
         global DOWNLOAD_STATE
         last_progress = None
 
-        # Enquanto em "starting" ou "downloading", envia updates
         while DOWNLOAD_STATE.get("status") in ("starting", "downloading"):
             prog = DOWNLOAD_STATE.get("progress", 0.0)
             if prog != last_progress:
@@ -306,7 +248,6 @@ def download_progress_route() -> Response:
                 last_progress = prog
             time.sleep(0.4)
 
-        # Final: finished ou error
         final_status = DOWNLOAD_STATE.get("status", "finished")
         if final_status == "error":
             data = json.dumps({'progress': -1, 'error': 'Falha no download.'})
@@ -314,14 +255,12 @@ def download_progress_route() -> Response:
             data = json.dumps({'progress': 100})
         yield f"data: {data}\n\n"
 
-    # Cabeçalhos úteis ao SSE
     headers = {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
-        "X-Accel-Buffering": "no"  # Nginx: desabilita buffer
+        "X-Accel-Buffering": "no"
     }
     return Response(generate(), headers=headers)
-
 
 @app.route('/metadata', methods=['GET', 'POST'])
 def metadata_route():
@@ -356,45 +295,30 @@ def metadata_route():
         logging.exception('Erro ao extrair metadados')
         return jsonify({ 'error': str(e) }), 500
 
-
 @app.route('/como_usar')
 def como_usar():
     """Corrigido: o template chama-se 'comousar.html'."""
     return render_template('comousar.html')
 
-
 @app.route('/contato')
 def contato():
     return render_template('contato.html')
-
 
 @app.route('/termos-e-condicoes')
 def termosecondicoes():
     return render_template('termos-e-condicoes.html')
 
-
-# Um handler simples para 500 que loga e retorna mensagem amigável (opcional)
 @app.errorhandler(500)
 def internal_error(e):
     logging.exception("Erro 500 não tratado")
     resp = make_response(render_template('index.html', message="Erro interno do servidor."), 500)
     return resp
 
-
-# --- Execução da Aplicação ---
-# O bloco if __name__ == '__main__': não é executado pelo Vercel,
-# mas é mantido para testes locais.
 if __name__ == '__main__':
-    # Em produção, use debug=False
-    
-    # <--- MUDANÇA (5) ---
-    # Garante que o FFmpeg local (Windows) seja encontrado para testes locais
-    # Isso NÃO afeta o Vercel.
-    if os.name == 'nt': # 'nt' é Windows
-         local_ffmpeg_dir = r"C:\ffmpeg\bin" 
+    if os.name == 'nt':
+         local_ffmpeg_dir = r"C:\ffmpeg\bin"
          os.environ["PATH"] = local_ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
          os.environ["FFMPEG_LOCATION"] = local_ffmpeg_dir
-         # Para testes locais, o caminho do binário não será o mesmo
-         FFMPEG_PATH = local_ffmpeg_dir # Sobrescreve para o teste local
+         FFMPEG_PATH = local_ffmpeg_dir
     
     app.run(host="0.0.0.0", port=8080, debug=True)
