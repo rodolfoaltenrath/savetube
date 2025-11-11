@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body { height: 100%; }
+
+/* helpers para estados antigos */
+.inactive { opacity: .7; }
+.active { opacity: 1; }
+
+/* sticky class opcional (se quiser estilizar) */
+.is-sticky { backdrop-filter: blur(6px); }
+
+/* Glassmorphism cards */
+@layer components {
+  .glass-card {
+    /* vidro harmonizado para claro/escuro */
+    @apply rounded-2xl border border-white/20 dark:border-white/10 backdrop-blur-xl backdrop-saturate-150;
+    @apply bg-white/10 dark:bg-white/5 shadow-lg;
+  }
+}
+
+/* Ajuste: substituir teal (#04cecb) por azul comum e um pouco mais escuro */
+.glass-card {
+  /* azul #2563eb */
+  border-color: rgba(37, 99, 235, .55) !important;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, .40), 0 14px 34px -18px rgba(37, 99, 235, .35) !important;
+}
+
+/* Scrollbar fino e com cores do tema */
+/* Firefox */
+html, body, * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(56, 189, 248, .65) transparent; /* sky-400 */
+}
+.dark html, .dark body, .dark * {
+  scrollbar-color: rgba(56, 189, 248, .75) transparent;
+}
+
+/* WebKit (Chrome/Edge/Safari/opera) */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(56, 189, 248, .65);
+  border-radius: 999px;
+  border: 2px solid transparent; /* cria "almofada" para parecer mais fino */
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(56, 189, 248, .85);
+}
+.dark *::-webkit-scrollbar-thumb {
+  background-color: rgba(56, 189, 248, .75);
+}
+.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(56, 189, 248, .95);
+}
+
+/* Header nav links: slide-up animation fix */
+.navlink{ position:relative; display:inline-block; overflow:hidden; height:1.25rem; padding:0 .3rem; white-space:nowrap; }
+.navlink span{ display:block; line-height:1.25rem; transition: transform .45s cubic-bezier(.2,.7,.2,1); }
+.navlink span:nth-child(1){ transform: translateY(0%); }
+.navlink span:nth-child(2){ position:absolute; inset-inline-start:0; top:0; transform: translateY(110%); }
+.navlink:hover span:nth-child(1){ transform: translateY(-90%); }
+.navlink:hover span:nth-child(2){ transform: translateY(0%); }
